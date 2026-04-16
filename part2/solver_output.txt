@@ -1,0 +1,62 @@
+==============================================================================
+Part 2 -- Compliance Checking with Unsat Cores
+Base model : part1/smt.txt
+==============================================================================
+
+[PASS] D1 -- Maya, 9-year-old biological child
+  scenario file  : scenario_dep_child.smt2
+  expected       : dependent
+  verdict        : dependent
+  Query A (is_dependent)     -> sat
+  Query B (not is_dependent) -> unsat
+  justifying rules: ['rule_152a_dependent_sufficient', 'rule_152c1_qc_sufficient']
+  scenario facts in core: ['fact_d1_abode', 'fact_d1_age_9', 'fact_d1_citizen', 'fact_d1_is_child', 'fact_d1_local_law_ok', 'fact_d1_no_joint_return', 'fact_d1_no_self_support', 'fact_d1_younger', 'query_not_dependent']
+
+[PASS] D2 -- Jacob, 21-year-old full-time student
+  scenario file  : scenario_dep_student.smt2
+  expected       : dependent
+  verdict        : dependent
+  Query A (is_dependent)     -> sat
+  Query B (not is_dependent) -> unsat
+  justifying rules: ['rule_152a_dependent_sufficient', 'rule_152c1_qc_sufficient']
+  scenario facts in core: ['fact_d2_abode', 'fact_d2_age_21', 'fact_d2_citizen', 'fact_d2_is_child', 'fact_d2_is_student', 'fact_d2_local_law_ok', 'fact_d2_no_joint_return', 'fact_d2_no_self_support', 'fact_d2_younger', 'query_not_dependent']
+
+[PASS] D3 -- Elena, 72-year-old resident mother
+  scenario file  : scenario_dep_mother.smt2
+  expected       : dependent
+  verdict        : dependent
+  Query A (is_dependent)     -> sat
+  Query B (not is_dependent) -> unsat
+  justifying rules: ['rule_152a_dependent_sufficient', 'rule_152d1_qr_sufficient']
+  scenario facts in core: ['fact_d3_exemption_5050', 'fact_d3_gross_income_3000', 'fact_d3_is_mother', 'fact_d3_no_joint_return', 'fact_d3_not_disabled', 'fact_d3_not_qc_of_any', 'fact_d3_support', 'fact_d3_us_resident', 'query_not_dependent']
+
+[PASS] N1 -- Sarah, 17-year-old who filed a joint return
+  scenario file  : scenario_nondep_joint.smt2
+  expected       : not_dependent
+  verdict        : not_dependent
+  Query A (is_dependent)     -> unsat
+  Query B (not is_dependent) -> sat
+  violated rules  : ['rule_152b2_joint_return']
+  scenario facts in core: ['fact_n1_filed_joint_return', 'query_is_dependent']
+
+[PASS] N2 -- Marcus, 22-year-old self-supporting son
+  scenario file  : scenario_nondep_income.smt2
+  expected       : not_dependent
+  verdict        : not_dependent
+  Query A (is_dependent)     -> unsat
+  Query B (not is_dependent) -> sat
+  violated rules  : ['rule_152a_dependent_is_qc_or_qr', 'rule_152c1C_qc_age', 'rule_152d1C_qr_support']
+  scenario facts in core: ['fact_n2_age_22', 'fact_n2_no_multi_support', 'fact_n2_not_disabled', 'fact_n2_not_student', 'fact_n2_support_fail', 'query_is_dependent']
+
+[PASS] N3 -- Lin, friend / tenant (no qualifying relationship)
+  scenario file  : scenario_nondep_friend.smt2
+  expected       : not_dependent
+  verdict        : not_dependent
+  Query A (is_dependent)     -> unsat
+  Query B (not is_dependent) -> sat
+  violated rules  : ['rule_152a_dependent_is_qc_or_qr', 'rule_152c1A_qc_relationship', 'rule_152d1A_qr_relationship']
+  scenario facts in core: ['fact_n3_not_auntuncle', 'fact_n3_not_child', 'fact_n3_not_household_member', 'fact_n3_not_inlaw', 'fact_n3_not_niecenephew', 'fact_n3_not_parent', 'fact_n3_not_sibling', 'fact_n3_not_sibling_desc', 'fact_n3_not_stepparent', 'query_is_dependent']
+
+==============================================================================
+Overall: ALL PASS
+==============================================================================

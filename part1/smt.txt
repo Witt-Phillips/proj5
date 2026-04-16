@@ -1,0 +1,290 @@
+; ============================================================
+; Project 5 -- 26 U.S.C. 152 "Dependent" definition
+; SMT-LIB2 encoding with NAMED rules for unsat-core extraction
+;
+; Built from proj5's predecessor (proj4/part1/smt.txt). All
+; uninterpreted sorts, primitive predicates, and purely
+; definitional `define-fun` helpers (qc_relationship,
+; meets_qc_age_requirement, qr_relationship,
+; effective_gross_income, support_test_met, citizenship_ok)
+; are carried over unchanged. The three top-level predicates
+; is_qualifying_child, is_qualifying_relative, and is_dependent
+; were `define-fun` abbreviations in proj4; here they are
+; refactored into uninterpreted predicates characterized by a
+; set of `(! ... :named rule_*)` axioms, one per statutory
+; clause. This lets Z3's (get-unsat-core) identify exactly
+; which 152(*) clauses conflict with (or justify) a scenario.
+;
+; Section 152(c)(4) tiebreaker, 152(d)(3) multiple-support,
+; 152(d)(4) sheltered-workshop, 152(e) divorced parents, and
+; the 152(f) definitional helpers are kept as helper
+; `define-fun`s or supporting predicates; they are not split
+; into named axioms because no scenario in this project
+; contests them.
+;
+; Translation by the Cursor assistant (Anthropic Claude, a
+; free model as used for this assignment). Original proj4
+; translation credit: Claude sonnet-4-6 via CoT prompting.
+; ============================================================
+
+(set-option :produce-unsat-cores true)
+(set-logic ALL)
+
+; ============================================================
+; Sorts
+; ============================================================
+(declare-sort Person 0)
+(declare-sort TaxYear 0)
+
+; ============================================================
+; Primitive predicates (uninterpreted functions)
+; [carried over from proj4/part1/smt.txt]
+; ============================================================
+
+; 152(b)(3) Citizenship / Residency
+(declare-fun is_us_citizen_or_national (Person) Bool)
+(declare-fun is_us_resident (Person) Bool)
+(declare-fun is_resident_contiguous_country (Person) Bool)
+
+; Household / Abode
+(declare-fun same_abode_majority (Person Person TaxYear) Bool)
+(declare-fun is_household_member (Person Person TaxYear) Bool)
+(declare-fun relationship_violates_local_law (Person Person TaxYear) Bool)
+
+; Joint return
+(declare-fun filed_joint_return (Person TaxYear) Bool)
+(declare-fun filed_joint_return_only_for_refund (Person TaxYear) Bool)
+
+; Age
+(declare-fun age_at_year_end (Person TaxYear) Int)
+(declare-fun is_younger_than (Person Person TaxYear) Bool)
+
+; Student / Disability
+(declare-fun is_student (Person TaxYear) Bool)
+(declare-fun is_permanently_disabled (Person TaxYear) Bool)
+
+; Support
+(declare-fun provided_over_half_own_support (Person TaxYear) Bool)
+(declare-fun taxpayer_provided_over_half_support (Person Person TaxYear) Bool)
+
+; Income
+(declare-fun gross_income (Person TaxYear) Real)
+(declare-fun exemption_amount (TaxYear) Real)
+
+; Qualifying-child relationship predicates (152(c)(2))
+(declare-fun is_child_or_descendant_of_taxpayer (Person Person) Bool)
+(declare-fun is_sibling_or_sibling_descendant_of_taxpayer (Person Person) Bool)
+
+; Qualifying-relative relationship predicates (152(d)(2))
+(declare-fun is_sibling_of_taxpayer (Person Person) Bool)
+(declare-fun is_parent_or_ancestor_of_taxpayer (Person Person) Bool)
+(declare-fun is_stepparent_of_taxpayer (Person Person) Bool)
+(declare-fun is_sibling_child_of_taxpayer (Person Person) Bool)
+(declare-fun is_parent_sibling_of_taxpayer (Person Person) Bool)
+(declare-fun is_in_law_of_taxpayer (Person Person) Bool)
+
+; 152(c)(4) tiebreaker helpers
+(declare-fun is_parent_of (Person Person) Bool)
+(declare-fun agi (Person TaxYear) Real)
+(declare-fun residence_days_with (Person Person TaxYear) Int)
+
+; Multiple support agreement (152(d)(3)) and sheltered workshop (152(d)(4))
+(declare-fun qualifies_under_multiple_support_agreement (Person Person TaxYear) Bool)
+(declare-fun sheltered_workshop_income (Person TaxYear) Real)
+(declare-fun at_workshop_for_medical_care (Person TaxYear) Bool)
+
+; Is ind a qualifying child of any taxpayer for the year (152(d)(1)(D))
+(declare-fun is_qc_of_any_taxpayer (Person TaxYear) Bool)
+
+; ============================================================
+; Helper define-funs (definitional; not named rules)
+; ============================================================
+
+; 152(c)(2) -- QC relationship test
+(define-fun qc_relationship ((ind Person) (tp Person)) Bool
+  (or (is_child_or_descendant_of_taxpayer ind tp)
+      (is_sibling_or_sibling_descendant_of_taxpayer ind tp)))
+
+; 152(c)(3) -- QC age test
+(define-fun meets_qc_age_requirement ((ind Person) (tp Person) (yr TaxYear)) Bool
+  (or
+    (is_permanently_disabled ind yr)
+    (and (is_younger_than ind tp yr)
+         (or (< (age_at_year_end ind yr) 19)
+             (and (is_student ind yr)
+                  (< (age_at_year_end ind yr) 24))))))
+
+; 152(d)(2) -- QR relationship test (including household-member catch-all)
+(define-fun qr_relationship ((ind Person) (tp Person) (yr TaxYear)) Bool
+  (or
+    (is_child_or_descendant_of_taxpayer ind tp)
+    (is_sibling_of_taxpayer ind tp)
+    (is_parent_or_ancestor_of_taxpayer ind tp)
+    (is_stepparent_of_taxpayer ind tp)
+    (is_sibling_child_of_taxpayer ind tp)
+    (is_parent_sibling_of_taxpayer ind tp)
+    (is_in_law_of_taxpayer ind tp)
+    (and (is_household_member ind tp yr)
+         (not (relationship_violates_local_law ind tp yr)))))
+
+; 152(d)(4) -- sheltered-workshop gross-income exclusion
+(define-fun effective_gross_income ((ind Person) (yr TaxYear)) Real
+  (ite (and (is_permanently_disabled ind yr)
+            (at_workshop_for_medical_care ind yr))
+       (- (gross_income ind yr) (sheltered_workshop_income ind yr))
+       (gross_income ind yr)))
+
+; 152(d)(1)(C) + 152(d)(3) -- extended support test
+(define-fun support_test_met ((tp Person) (ind Person) (yr TaxYear)) Bool
+  (or (taxpayer_provided_over_half_support tp ind yr)
+      (qualifies_under_multiple_support_agreement tp ind yr)))
+
+; 152(b)(3) -- citizenship / residency
+(define-fun citizenship_ok ((ind Person)) Bool
+  (or (is_us_citizen_or_national ind)
+      (is_us_resident ind)
+      (is_resident_contiguous_country ind)))
+
+; ============================================================
+; Core predicates (uninterpreted; characterized by named rules)
+; ============================================================
+(declare-fun is_qualifying_child    (Person Person TaxYear) Bool)
+(declare-fun is_qualifying_relative (Person Person TaxYear) Bool)
+(declare-fun is_dependent           (Person Person TaxYear) Bool)
+
+; ============================================================
+; NAMED legal rules -- 152(c) Qualifying Child
+; ============================================================
+
+; 152(c)(1)(A) -- QC relationship is necessary
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_child ind tp yr)
+                 (qc_relationship ind tp)))
+           :named rule_152c1A_qc_relationship))
+
+; 152(c)(1)(B) -- same principal place of abode for more than half the year
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_child ind tp yr)
+                 (same_abode_majority ind tp yr)))
+           :named rule_152c1B_qc_abode))
+
+; 152(c)(1)(C) -- age requirement
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_child ind tp yr)
+                 (meets_qc_age_requirement ind tp yr)))
+           :named rule_152c1C_qc_age))
+
+; 152(c)(1)(D) -- individual has not provided over half of own support
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_child ind tp yr)
+                 (not (provided_over_half_own_support ind yr))))
+           :named rule_152c1D_qc_self_support))
+
+; 152(c)(1)(E) -- no joint return (except refund-only)
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_child ind tp yr)
+                 (or (not (filed_joint_return ind yr))
+                     (filed_joint_return_only_for_refund ind yr))))
+           :named rule_152c1E_qc_joint_return))
+
+; 152(f)(3) -- relationship must not violate local law (for QC)
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_child ind tp yr)
+                 (not (relationship_violates_local_law ind tp yr))))
+           :named rule_152f3_local_law_qc))
+
+; 152(c)(1) -- sufficient direction: all five clauses + f(3) imply QC
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (and (qc_relationship ind tp)
+                      (same_abode_majority ind tp yr)
+                      (meets_qc_age_requirement ind tp yr)
+                      (not (provided_over_half_own_support ind yr))
+                      (or (not (filed_joint_return ind yr))
+                          (filed_joint_return_only_for_refund ind yr))
+                      (not (relationship_violates_local_law ind tp yr)))
+                 (is_qualifying_child ind tp yr)))
+           :named rule_152c1_qc_sufficient))
+
+; ============================================================
+; NAMED legal rules -- 152(d) Qualifying Relative
+; ============================================================
+
+; 152(d)(1)(A) -- QR relationship (one of (A)..(H) in 152(d)(2))
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_relative ind tp yr)
+                 (qr_relationship ind tp yr)))
+           :named rule_152d1A_qr_relationship))
+
+; 152(d)(1)(B) -- gross income less than exemption amount
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_relative ind tp yr)
+                 (< (effective_gross_income ind yr) (exemption_amount yr))))
+           :named rule_152d1B_qr_gross_income))
+
+; 152(d)(1)(C) -- taxpayer provides over half of support
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_relative ind tp yr)
+                 (support_test_met tp ind yr)))
+           :named rule_152d1C_qr_support))
+
+; 152(d)(1)(D) -- not a qualifying child of any taxpayer
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_qualifying_relative ind tp yr)
+                 (not (is_qc_of_any_taxpayer ind yr))))
+           :named rule_152d1D_qr_not_qc))
+
+; 152(d)(1) -- sufficient direction: all four clauses imply QR
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (and (qr_relationship ind tp yr)
+                      (< (effective_gross_income ind yr) (exemption_amount yr))
+                      (support_test_met tp ind yr)
+                      (not (is_qc_of_any_taxpayer ind yr)))
+                 (is_qualifying_relative ind tp yr)))
+           :named rule_152d1_qr_sufficient))
+
+; ============================================================
+; NAMED legal rules -- 152(a), 152(b) Dependent definition
+; ============================================================
+
+; 152(a) -- dependent must be a QC or QR
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_dependent ind tp yr)
+                 (or (is_qualifying_child ind tp yr)
+                     (is_qualifying_relative ind tp yr))))
+           :named rule_152a_dependent_is_qc_or_qr))
+
+; 152(b)(2) -- individual who filed a joint return is not a dependent
+;              (NOTE: at the dependent level there is NO refund-only exception)
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_dependent ind tp yr)
+                 (not (filed_joint_return ind yr))))
+           :named rule_152b2_joint_return))
+
+; 152(b)(3) -- citizenship / residency requirement
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (is_dependent ind tp yr)
+                 (citizenship_ok ind)))
+           :named rule_152b3_citizenship))
+
+; 152(a)+(b) -- sufficient direction: QC-or-QR with no joint return and
+;               citizenship OK implies dependent
+(assert (! (forall ((ind Person) (tp Person) (yr TaxYear))
+             (=> (and (or (is_qualifying_child ind tp yr)
+                          (is_qualifying_relative ind tp yr))
+                      (not (filed_joint_return ind yr))
+                      (citizenship_ok ind))
+                 (is_dependent ind tp yr)))
+           :named rule_152a_dependent_sufficient))
+
+; 152(b)(1) -- dependents cannot themselves claim dependents
+(assert (! (forall ((ind Person) (tp Person) (other Person) (yr TaxYear))
+             (=> (is_dependent ind tp yr)
+                 (not (is_dependent other ind yr))))
+           :named rule_152b1_no_dep_of_dep))
+
+; ============================================================
+; Consistency check of the axioms alone
+; (Scenarios are appended by the Part 2 runner, which also
+;  emits its own (check-sat) and (get-unsat-core).)
+; ============================================================
+(check-sat)
